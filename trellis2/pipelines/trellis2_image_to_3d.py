@@ -497,9 +497,15 @@ class Trellis2ImageTo3DPipeline(Pipeline):
         decoded = decoder(z_s)>0
         if self.low_vram:
             decoder.cpu()
+        # if resolution != decoded.shape[2]:
+            # ratio = decoded.shape[2] // resolution
+            # decoded = torch.nn.functional.max_pool3d(decoded.float(), ratio, ratio, 0) > 0.5
         if resolution != decoded.shape[2]:
-            ratio = decoded.shape[2] // resolution
-            decoded = torch.nn.functional.max_pool3d(decoded.float(), ratio, ratio, 0) > 0.5
+            if resolution < decoded.shape[2]:
+                ratio = decoded.shape[2] // resolution
+                decoded = torch.nn.functional.max_pool3d(decoded.float(), ratio, ratio, 0) > 0.5
+            else:
+                decoded = torch.nn.functional.interpolate(decoded.float(), size=(resolution, resolution, resolution), mode='nearest') > 0.5            
         coords = torch.argwhere(decoded)[:, [0, 2, 3, 4]].int()
 
         coords = coords.cpu()
@@ -571,6 +577,7 @@ class Trellis2ImageTo3DPipeline(Pipeline):
         coords: torch.Tensor,
         sampler_params: dict = {},
         max_num_tokens: int = 49152,
+        sparse_structure_resolution: int = 32,
     ) -> SparseTensor:
         """
         Sample structured latent with the given conditioning.
@@ -628,23 +635,28 @@ class Trellis2ImageTo3DPipeline(Pipeline):
         
         if not self.keep_models_loaded:
             self.unload_shape_slat_decoder()
+            
+        ratio = (sparse_structure_resolution / 32)
         
         while True:
             quant_coords = torch.cat([
                 hr_coords[:, :1],
-                ((hr_coords[:, 1:] + 0.5) / lr_resolution * (hr_resolution // 16)).int(),
+                ((hr_coords[:, 1:] + 0.5) / (lr_resolution * ratio) * (hr_resolution // 16)).int(),
             ], dim=1)
             coords = quant_coords.unique(dim=0)
             num_tokens = coords.shape[0]
             if num_tokens < max_num_tokens:
                 if hr_resolution != resolution:
                     print(f"Due to the limited number of tokens, the resolution is reduced to {hr_resolution}.")
+                print(f"Num Tokens: {num_tokens}")
                 break
             hr_resolution -= 128
             if hr_resolution < 1024 and resolution >= 1024:
+                print(f"Num Tokens: {num_tokens}")
                 hr_resolution = 1024
                 break
             if hr_resolution < 512:
+                print(f"Num Tokens: {num_tokens}")
                 hr_resolution = 512
                 break
         
@@ -1015,7 +1027,8 @@ class Trellis2ImageTo3DPipeline(Pipeline):
                 self.models['shape_slat_flow_model_512'], self.models['shape_slat_flow_model_1024'],
                 512, 1024,
                 coords, shape_slat_sampler_params,
-                max_num_tokens
+                max_num_tokens,
+                sparse_structure_resolution
             )
             
             if pbar is not None:
@@ -1046,7 +1059,8 @@ class Trellis2ImageTo3DPipeline(Pipeline):
                 self.models['shape_slat_flow_model_512'], self.models['shape_slat_flow_model_1024'],
                 512, 2048,
                 coords, shape_slat_sampler_params,
-                max_num_tokens
+                max_num_tokens,
+                sparse_structure_resolution
             )
             
             if pbar is not None:
@@ -1077,7 +1091,8 @@ class Trellis2ImageTo3DPipeline(Pipeline):
                 self.models['shape_slat_flow_model_512'], self.models['shape_slat_flow_model_1024'],
                 512, 4096,
                 coords, shape_slat_sampler_params,
-                max_num_tokens
+                max_num_tokens,
+                sparse_structure_resolution
             )
             
             if pbar is not None:
@@ -1108,7 +1123,8 @@ class Trellis2ImageTo3DPipeline(Pipeline):
                 self.models['shape_slat_flow_model_512'], self.models['shape_slat_flow_model_1024'],
                 512, 1536,
                 coords, shape_slat_sampler_params,
-                max_num_tokens
+                max_num_tokens,
+                sparse_structure_resolution
             )
             
             if pbar is not None:
@@ -1255,6 +1271,7 @@ class Trellis2ImageTo3DPipeline(Pipeline):
                 max_num_tokens,
                 front_axis=front_axis,
                 blend_temperature=blend_temperature,
+                sparse_structure_resolution = sparse_structure_resolution
             )
             res = 1024
             
@@ -1273,6 +1290,7 @@ class Trellis2ImageTo3DPipeline(Pipeline):
                 max_num_tokens,
                 front_axis=front_axis,
                 blend_temperature=blend_temperature,
+                sparse_structure_resolution = sparse_structure_resolution
             )
             res = 1536
              
@@ -1417,9 +1435,15 @@ class Trellis2ImageTo3DPipeline(Pipeline):
             decoder.cpu()
             self._cleanup_cuda()
             
+        # if resolution != decoded.shape[2]:
+            # ratio = decoded.shape[2] // resolution
+            # decoded = torch.nn.functional.max_pool3d(decoded.float(), ratio, ratio, 0) > 0.5
         if resolution != decoded.shape[2]:
-            ratio = decoded.shape[2] // resolution
-            decoded = torch.nn.functional.max_pool3d(decoded.float(), ratio, ratio, 0) > 0.5
+            if resolution < decoded.shape[2]:
+                ratio = decoded.shape[2] // resolution
+                decoded = torch.nn.functional.max_pool3d(decoded.float(), ratio, ratio, 0) > 0.5
+            else:
+                decoded = torch.nn.functional.interpolate(decoded.float(), size=(resolution, resolution, resolution), mode='nearest') > 0.5            
         
         # Extract coordinates (N, 4) -> (b, d, h, w)
         # argwhere returns (b, c, d, h, w), so we want [0, 2, 3, 4]
@@ -1507,6 +1531,7 @@ class Trellis2ImageTo3DPipeline(Pipeline):
         max_num_tokens: int = 49152,
         front_axis: str = 'z',
         blend_temperature: float = 2.0,
+        sparse_structure_resolution: int = 32,
     ) -> SparseTensor:
         # LR
         if self.low_vram:
@@ -1561,12 +1586,14 @@ class Trellis2ImageTo3DPipeline(Pipeline):
         if self.low_vram:
             self.models['shape_slat_decoder'].cpu()
             self.models['shape_slat_decoder'].low_vram = False
-            
+        
+        ratio = sparse_structure_resolution / 32
+        
         hr_resolution = resolution
         while True:
             quant_coords = torch.cat([
                 hr_coords[:, :1],
-                ((hr_coords[:, 1:] + 0.5) / lr_resolution * (hr_resolution // 16)).int(),
+                ((hr_coords[:, 1:] + 0.5) / (lr_resolution * ratio) * (hr_resolution // 16)).int(),
             ], dim=1)
             coords = quant_coords.unique(dim=0)
             num_tokens = coords.shape[0]

@@ -422,7 +422,7 @@ class Trellis2MeshWithVoxelGenerator:
                 "texture_steps": ("INT",{"default":12, "min":1, "max":100},),
                 "max_num_tokens": ("INT",{"default":49152,"min":0,"max":999999}),
                 "max_views": ("INT", {"default": 4, "min": 1, "max": 16}),
-                "sparse_structure_resolution": ("INT", {"default":32,"min":8,"max":128,"step":8}),
+                "sparse_structure_resolution": ("INT", {"default":32,"min":32,"max":128,"step":4}),
                 "generate_texture_slat": ("BOOLEAN", {"default":True}),
                 "use_tiled_decoder": ("BOOLEAN", {"default":True}),
             },
@@ -1224,7 +1224,7 @@ class Trellis2MeshWithVoxelAdvancedGenerator:
                 "texture_rescale_t": ("FLOAT",{"default":3.00,"min":0.00,"max":9.99,"step":0.01}),                
                 "max_num_tokens": ("INT",{"default":999999,"min":0,"max":999999}),
                 "max_views": ("INT", {"default": 4, "min": 1, "max": 16}),
-                "sparse_structure_resolution": ("INT", {"default":32,"min":8,"max":128,"step":8}),
+                "sparse_structure_resolution": ("INT", {"default":32,"min":32,"max":128,"step":4}),
                 "generate_texture_slat": ("BOOLEAN", {"default":True}),
                 "sparse_structure_guidance_interval_start": ("FLOAT",{"default":0.10,"min":0.00,"max":1.00,"step":0.01}),
                 "sparse_structure_guidance_interval_end": ("FLOAT",{"default":1.00,"min":0.00,"max":1.00,"step":0.01}),
@@ -1325,7 +1325,7 @@ class Trellis2MeshWithVoxelMultiViewGenerator:
                 "texture_guidance_rescale": ("FLOAT",{"default":0.20,"min":0.00,"max":1.00,"step":0.01}),
                 "texture_rescale_t": ("FLOAT",{"default":3.00,"min":0.00,"max":9.99,"step":0.01}),                 
                 "max_num_tokens": ("INT",{"default":999999,"min":0,"max":999999}),
-                "sparse_structure_resolution": ("INT", {"default":32,"min":8,"max":128,"step":8}),
+                "sparse_structure_resolution": ("INT", {"default":32,"min":32,"max":128,"step":4}),
                 "generate_texture_slat": ("BOOLEAN", {"default":True}),
                 "sparse_structure_guidance_interval_start": ("FLOAT",{"default":0.10,"min":0.00,"max":1.00,"step":0.01}),
                 "sparse_structure_guidance_interval_end": ("FLOAT",{"default":1.00,"min":0.00,"max":1.00,"step":0.01}),
@@ -2029,7 +2029,7 @@ class Trellis2ReconstructMeshWithQuad:
                 "remesh_band": ("FLOAT",{"default":1.0}),
                 "resolution": ([128,256,512,1024,2048],{"default":512}),
                 "remove_floaters": ("BOOLEAN",{"default":True}),
-                "remove_inner_faces": ("BOOLEAN",{"default":False}),                  
+                "remove_inner_faces": ("BOOLEAN",{"default":False}),
             }
         }
 
@@ -2429,6 +2429,10 @@ class Trellis2PostProcess2:
                 "remove_duplicate_faces": ("BOOLEAN",{"default":True}),
                 "weld_vertices": ("BOOLEAN",{"default":True}),
                 "weld_vertices_digits": ("INT",{"default":4,"min":1,"max":8}),
+                "smooth": ("BOOLEAN",{"default":False}),
+                "smooth_iterations": ("INT",{"default":10,"min":1,"max":99,"step":1}),
+                "subdivide": ("BOOLEAN",{"default":False}),
+                "subdivide_iterations": ("INT",{"default":1,"min":1,"max":10}),
             },
         }
 
@@ -2438,7 +2442,7 @@ class Trellis2PostProcess2:
     CATEGORY = "Trellis2Wrapper"
     OUTPUT_NODE = True
 
-    def process(self, mesh, fill_holes, fix_normals, fix_face_orientation, remove_duplicate_faces, weld_vertices, weld_vertices_digits,):
+    def process(self, mesh, fill_holes, fix_normals, fix_face_orientation, remove_duplicate_faces, weld_vertices, weld_vertices_digits,smooth,smooth_iterations,subdivide,subdivide_iterations):
         mesh_copy = copy.deepcopy(mesh)
         
         vertices_np = mesh_copy.vertices.cpu().numpy()
@@ -2480,8 +2484,18 @@ class Trellis2PostProcess2:
             nb_faces_removed = faces_count - new_faces_count
             print(f"Weld Vertices: Removed {nb_vertices_removed} vertices / {nb_faces_removed} faces")
         
+        if smooth:
+            print('Smoothing ...')
+            Trimesh.smoothing.filter_taubin(trimesh, lamb=0.5, nu=-0.53, iterations=smooth_iterations)
+            
+        if subdivide:
+            print('Subdividing ...')
+            trimesh = trimesh.subdivide_loop(iterations=subdivide_iterations)
+        
         new_vertices = torch.from_numpy(trimesh.vertices).float()
-        new_faces = torch.from_numpy(trimesh.faces).int()                
+        new_faces = torch.from_numpy(trimesh.faces).int()
+
+        print(f"After postprocessing: {len(new_faces)} faces")
         
         mesh_copy.vertices = new_vertices.to(mesh_copy.device)
         mesh_copy.faces = new_faces.to(mesh_copy.device) 
@@ -2736,7 +2750,7 @@ class Trellis2RemeshWithQuad:
                 "remesh_project": ("FLOAT",{"default":0.0}),
                 "dual_contouring_resolution": (["Auto","128","256","512","1024","2048"],{"default":"Auto"}),
                 "remove_floaters": ("BOOLEAN",{"default":True}),
-                "remove_inner_faces": ("BOOLEAN",{"default":True}),
+                "remove_inner_faces": ("BOOLEAN",{"default":True})
             }
         }
 
@@ -3055,6 +3069,49 @@ class Trellis2FillHolesWithCuMesh:
         mesh_copy.fill_holes(max_hole_perimeter = max_permieters)
         
         return (mesh_copy,)         
+
+class Trellis2LaplacianSmoothingWithOpen3d:
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "mesh": ("MESHWITHVOXEL",),
+                "iterations": ("INT",{"default":10, "min":1, "max":100}),
+                "method": (["Laplacian", "Taubin"],{"default":"Laplacian"}),
+            },
+        }
+
+    RETURN_TYPES = ("MESHWITHVOXEL", )
+    RETURN_NAMES = ("mesh", )
+    FUNCTION = "process"
+    CATEGORY = "Trellis2Wrapper"
+    OUTPUT_NODE = True
+
+    def process(self, mesh, iterations, method):
+        import open3d
+        mesh_copy = copy.deepcopy(mesh)
+        vertices = mesh_copy.vertices.cpu().numpy()
+        faces = mesh_copy.faces.cpu().numpy().astype(np.int32)
+        
+        open3d_mesh = open3d.geometry.TriangleMesh()
+        open3d_mesh.vertices = open3d.utility.Vector3dVector(vertices)
+        open3d_mesh.triangles = open3d.utility.Vector3iVector(faces)
+        
+        if method == "Laplacian":
+            open3d_mesh = open3d_mesh.filter_smooth_laplacian(number_of_iterations=iterations)
+        elif method == "Taubin":
+            open3d_mesh = open3d_mesh.filter_smooth_taubin(number_of_iterations=iterations)
+            
+        open3d_mesh.compute_vertex_normals()
+        
+        new_vertices = np.asarray(open3d_mesh.vertices)
+        new_faces = np.asarray(open3d_mesh.triangles)
+        
+        mesh_copy.vertices = torch.from_numpy(new_vertices).float().to(mesh_copy.device)
+        mesh_copy.faces = torch.from_numpy(new_faces).int().to(mesh_copy.device)
+        
+        return (mesh_copy,)       
+
         
 NODE_CLASS_MAPPINGS = {
     "Trellis2LoadModel": Trellis2LoadModel,
@@ -3090,6 +3147,7 @@ NODE_CLASS_MAPPINGS = {
     "Trellis2ReconstructMeshWithQuad": Trellis2ReconstructMeshWithQuad,
     "Trellis2StringSelector": Trellis2StringSelector,
     "Trellis2FillHolesWithCuMesh": Trellis2FillHolesWithCuMesh,
+    "Trellis2LaplacianSmoothingWithOpen3d": Trellis2LaplacianSmoothingWithOpen3d,
     }
     
 
@@ -3127,4 +3185,5 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "Trellis2ReconstructMeshWithQuad": "Trellis2 - Reconstruct Mesh With Quad",
     "Trellis2StringSelector": "Trellis2 - String Selector",
     "Trellis2FillHolesWithCuMesh": "Trellis2 - Fill Holes with CuMesh",
+    "Trellis2LaplacianSmoothingWithOpen3d": "Trellis2 - Laplacian Smoothing (using open3d)",
     }
