@@ -1166,11 +1166,13 @@ class Trellis2ImageTo3DPipeline(Pipeline):
             if not self.keep_models_loaded:
                 self.unload_tex_slat_flow_model_1024()               
             
+        torch.cuda.synchronize()
         torch.cuda.empty_cache()
         if generate_texture_slat:
             out_mesh = self.decode_latent(shape_slat, tex_slat, res, use_tiled=use_tiled)
         else:
             out_mesh = self.decode_latent(shape_slat, None, res, use_tiled=use_tiled)
+        torch.cuda.synchronize()
         torch.cuda.empty_cache()
         pbar.update(1)              
         if return_latent:
@@ -1518,11 +1520,13 @@ class Trellis2ImageTo3DPipeline(Pipeline):
             if not self.keep_models_loaded:
                 self.unload_tex_slat_flow_model_1024()         
             
+        torch.cuda.synchronize()
         torch.cuda.empty_cache()
         if generate_texture_slat:
             out_mesh = self.decode_latent(shape_slat, tex_slat, res, use_tiled=use_tiled)
         else:
             out_mesh = self.decode_latent(shape_slat, None, res, use_tiled=use_tiled)
+        torch.cuda.synchronize()
         torch.cuda.empty_cache()
         pbar.update(1)              
 
@@ -1728,11 +1732,13 @@ class Trellis2ImageTo3DPipeline(Pipeline):
             if pbar is not None:
                 pbar.update(1)
                  
+        torch.cuda.synchronize()
         torch.cuda.empty_cache()
         if generate_texture_slat:
             out_mesh = self.decode_latent(shape_slat, tex_slat, res, use_tiled=use_tiled)
         else:
             out_mesh = self.decode_latent(shape_slat, None, res, use_tiled=use_tiled)            
+        torch.cuda.synchronize()
         torch.cuda.empty_cache()
         
         if pbar is not None:
@@ -2479,8 +2485,10 @@ class Trellis2ImageTo3DPipeline(Pipeline):
             if not self.keep_models_loaded:
                 self.unload_shape_slat_flow_model_1024()
 
+        torch.cuda.synchronize()
         torch.cuda.empty_cache()
         pbr_voxel = self.decode_tex_slat(tex_slat)
+        torch.cuda.synchronize()
         torch.cuda.empty_cache()
         
         out_mesh, baseColorTexture, metallicRoughnessTexture = self.postprocess_mesh(mesh, pbr_voxel, resolution, texture_size, texture_alpha_mode, double_side_material, bake_on_vertices, use_custom_normals, mesh_cluster_threshold_cone_half_angle_rad)
@@ -2574,8 +2582,10 @@ class Trellis2ImageTo3DPipeline(Pipeline):
             if not self.keep_models_loaded:
                 self.unload_shape_slat_flow_model_1024()
                 
+        torch.cuda.synchronize()
         torch.cuda.empty_cache()
         pbr_voxel = self.decode_tex_slat(tex_slat)
+        torch.cuda.synchronize()
         torch.cuda.empty_cache()
         
         out_mesh, baseColorTexture, metallicRoughnessTexture = self.postprocess_mesh(mesh, pbr_voxel, resolution, texture_size, texture_alpha_mode, double_side_material, bake_on_vertices, use_custom_normals, mesh_cluster_threshold_cone_half_angle_rad)
@@ -2812,11 +2822,13 @@ class Trellis2ImageTo3DPipeline(Pipeline):
             if not self.keep_models_loaded:
                 self.unload_tex_slat_flow_model_1024()                 
                 
+        torch.cuda.synchronize()
         torch.cuda.empty_cache()
         if generate_texture_slat:
             out_mesh = self.decode_latent(shape_slat, tex_slat, res, use_tiled=use_tiled)
         else:
             out_mesh = self.decode_latent(shape_slat, None, res, use_tiled=use_tiled)
+        torch.cuda.synchronize()
         torch.cuda.empty_cache()
         
         if return_latent:
